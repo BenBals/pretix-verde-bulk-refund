@@ -24,7 +24,6 @@ PRETIX_API_KEY = os.getenv('PRETIX_API_KEY')
 PRETIX_BASE_URL = os.getenv('PRETIX_BASE_URL')
 PRETIX_ORGANIZER = os.getenv('PRETIX_ORGANIZER')
 PRETIX_EVENT = os.getenv('PRETIX_EVENT')
-CUP_DEPOSIT_PRICE = os.getenv('CUP_DEPOSIT_PRICE')
 
 pretix_event_api_url = f"{PRETIX_BASE_URL}/api/v1/organizers/{PRETIX_ORGANIZER}/events/{PRETIX_EVENT}"
 auth_headers = {'Authorization': f'Token {PRETIX_API_KEY}'}
@@ -33,6 +32,7 @@ auth_headers = {'Authorization': f'Token {PRETIX_API_KEY}'}
 def resolve_ticket_secret_to_position_id(order_code, secret):
     resp = requests.get(f"{pretix_event_api_url}/orders/{order_code}/", headers=auth_headers)
 
+    resp.raise_for_status()
     positions = resp.json()["positions"]
 
     for position in positions:
@@ -49,39 +49,13 @@ def cancel_cup_deposit(cup_deposit_position_id, dry_run=True):
 
     logging.info(f"[cancel_cup_deposit] Cup deposit {cup_deposit_position_id} successfully canceled")
 
-
-def find_first_successful_refundable_payment_local_id(order_code):
-    resp = requests.get(f"{pretix_event_api_url}/orders/{order_code}/payments/", headers=auth_headers)
-
-    for payment in resp.json()["results"]:
-        if payment["state"] == "confirmed" and payment["provider"] != "manual":
-            return payment["local_id"]
-
-    raise Exception(f"[find_first_successful_refundable_payment_local_id] Could not find a successfull refunable payment for order {order_code}")
-
-
-def initiate_cup_deposit_refund(order_code, payment_local_id, dry_run=True):
-    if not dry_run:
-        resp = requests.post(
-            f"{pretix_event_api_url}/orders/{order_code}/payments/{payment_local_id}/refund/",
-            data={ "amount": CUP_DEPOSIT_PRICE, "mark_canceled": False },
-            headers=auth_headers
-        )
-
-        resp.raise_for_status()
-    logging.info(f"[initiate_cup_deposit_refund] Refund over €{CUP_DEPOSIT_PRICE} for order {order_code} successfully initiated")
-
-
 def process_refund(order_code, secret, dry_run=True):
     try:
         cup_deposit_position_id = resolve_ticket_secret_to_position_id(order_code, secret)
         cancel_cup_deposit(cup_deposit_position_id, dry_run=dry_run)
-        payment_local_id = find_first_successful_refundable_payment_local_id(order_code)
-        initiate_cup_deposit_refund(order_code, payment_local_id, dry_run=dry_run)
-
         return True
     except Exception as e:
-        logging.error(f"[process_refund] Refunding ({order_code}, {secret}) failed with error {e}")
+        logging.error(f"[process_refund] Canceling ({order_code}, {secret}) failed with error {e}")
         return False
 
 
